@@ -332,13 +332,13 @@ class IncomeStatementParser(BaseParser):
 
     def format_for_bitrix(self, parsed_data: Dict[str, Any]) -> str:
         """
-        Format parsed data as text table for Bitrix24 timeline
+        Format parsed data as simple text for Bitrix24 timeline
 
         Args:
             parsed_data: Parsed income data
 
         Returns:
-            Text formatted string with table borders
+            Text formatted string
         """
         try:
             if not parsed_data.get("success"):
@@ -350,30 +350,25 @@ class IncomeStatementParser(BaseParser):
             if not data:
                 return "⚠️ Не знайдено даних про доходи у документі"
 
-            # Build text table
+            # Build simple text output
             output = []
-            output.append("=" * 80)
+            output.append("================================================================================")
             output.append("📊 АНАЛІЗ СПРАВКИ ПРО ДОХОДИ")
-            output.append("=" * 80)
+            output.append("================================================================================")
             output.append("")
             output.append(f"💰 Загальна сума: {summary.get('total_amount', 0):.2f} грн")
             output.append(f"📅 Періоди: {', '.join(summary.get('years', []))}")
             output.append("")
 
-            # Table for each year
+            # Data for each year
             for year in sorted(data.keys()):
                 year_data = data[year]
                 year_total = year_data.get("_total", 0)
 
-                output.append("-" * 80)
+                output.append("--------------------------------------------------------------------------------")
                 output.append(f"📆 {year} рік • Всього: {year_total:.2f} грн")
-                output.append("-" * 80)
+                output.append("--------------------------------------------------------------------------------")
                 output.append("")
-
-                # Table header
-                output.append("┌──────┬────────────────────────────────────────────────┬──────────────┐")
-                output.append("│ Код  │ Назва                                          │ Сума (грн)   │")
-                output.append("├──────┼────────────────────────────────────────────────┼──────────────┤")
 
                 for code in sorted(year_data.keys()):
                     if code == "_total":
@@ -383,16 +378,11 @@ class IncomeStatementParser(BaseParser):
                     name = code_info.get('name', '-')
                     amount = code_info.get('amount', 0)
 
-                    # Truncate name if too long
-                    if len(name) > 46:
-                        name = name[:43] + "..."
+                    output.append(f"   🔹 Код {code}: {name}")
+                    output.append(f"      💵 Сума: {amount:.2f} грн")
+                    output.append("")
 
-                    output.append(f"│ {code:4s} │ {name:46s} │ {amount:12.2f} │")
-
-                output.append("└──────┴────────────────────────────────────────────────┴──────────────┘")
-                output.append("")
-
-            output.append("=" * 80)
+            output.append("================================================================================")
 
             return "\n".join(output)
 
