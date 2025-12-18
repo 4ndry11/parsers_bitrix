@@ -84,13 +84,25 @@ class IncomeStatementParser(BaseParser):
         """
         records = []
 
-        for table in tables:
+        self.logger.info(f"Processing {len(tables)} tables from Azure DI")
+
+        for table_idx, table in enumerate(tables):
             cells = table.get("cells", [])
             if not cells:
+                self.logger.warning(f"Table {table_idx} has no cells")
                 continue
 
+            row_count = table["rowCount"]
+            col_count = table["columnCount"]
+            self.logger.info(f"Table {table_idx}: {row_count} rows x {col_count} columns")
+
             # Build table structure
-            table_data = self._build_table_structure(cells, table["rowCount"], table["columnCount"])
+            table_data = self._build_table_structure(cells, row_count, col_count)
+
+            # Log first few rows to see what we're working with
+            self.logger.info(f"Table {table_idx} first 5 rows:")
+            for row_idx in range(min(5, len(table_data))):
+                self.logger.info(f"  Row {row_idx}: {table_data[row_idx][:10] if len(table_data[row_idx]) > 10 else table_data[row_idx]}")  # First 10 cells
 
             # Extract header row to find column indices
             header_row = 0
@@ -104,20 +116,26 @@ class IncomeStatementParser(BaseParser):
                 for col_idx, cell_content in enumerate(row):
                     if cell_content and "рік" in cell_content.lower():
                         col_year = col_idx
+                        self.logger.info(f"Found 'рік' at column {col_idx}: '{cell_content}'")
                     if cell_content and "нарахованого" in cell_content.lower():
                         col_amount = col_idx
+                        self.logger.info(f"Found 'нарахованого' at column {col_idx}: '{cell_content}'")
                     if cell_content and "код" in cell_content.lower() and "ознаки" in cell_content.lower():
                         col_code = col_idx
+                        self.logger.info(f"Found 'код...ознаки' at column {col_idx}: '{cell_content}'")
 
             if col_year is None or col_amount is None or col_code is None:
-                self.logger.warning(f"Could not find all required columns in table")
+                self.logger.warning(f"Table {table_idx}: Could not find all required columns (Year:{col_year}, Amount:{col_amount}, Code:{col_code})")
                 continue
 
-            self.logger.info(f"Found columns - Year: {col_year}, Amount: {col_amount}, Code: {col_code}")
+            self.logger.info(f"Table {table_idx} - Found columns - Year: {col_year}, Amount: {col_amount}, Code: {col_code}")
 
             # Extract data rows (skip header rows)
+            rows_processed = 0
+            rows_extracted = 0
             for row_idx in range(header_row + 1, len(table_data)):
                 row = table_data[row_idx]
+                rows_processed += 1
 
                 try:
                     year_cell = row[col_year] if col_year < len(row) else ""
@@ -127,20 +145,24 @@ class IncomeStatementParser(BaseParser):
                     # Extract year (should be 4 digits)
                     year_match = re.search(r'\b(20\d{2})\b', year_cell)
                     if not year_match:
+                        self.logger.debug(f"Row {row_idx}: No year found in '{year_cell}'")
                         continue
 
                     year = year_match.group(1)
 
                     # Extract amount (number with optional decimal)
-                    amount_match = re.search(r'(\d+(?:\.\d+)?)', amount_cell.replace(' ', ''))
+                    amount_cell_clean = amount_cell.replace(' ', '').replace(',', '.')
+                    amount_match = re.search(r'(\d+(?:[.,]\d+)?)', amount_cell_clean)
                     if not amount_match:
+                        self.logger.debug(f"Row {row_idx}: No amount found in '{amount_cell}'")
                         continue
 
-                    amount = float(amount_match.group(1))
+                    amount = float(amount_match.group(1).replace(',', '.'))
 
                     # Extract code (3 digits or specific patterns like "101 - Заробітна плата")
                     code_match = re.search(r'\b(\d{3})\b', code_cell)
                     if not code_match:
+                        self.logger.debug(f"Row {row_idx}: No code found in '{code_cell}'")
                         continue
 
                     code = code_match.group(1)
@@ -149,16 +171,21 @@ class IncomeStatementParser(BaseParser):
                     code_name_match = re.search(r'\d{3}\s*-\s*(.+)', code_cell)
                     code_name = code_name_match.group(1).strip() if code_name_match else ""
 
+                    self.logger.info(f"Row {row_idx}: Extracted - Year:{year}, Code:{code}, Amount:{amount}, Name:{code_name}")
+
                     records.append({
                         "year": year,
                         "code": code,
                         "code_name": code_name,
                         "amount": amount
                     })
+                    rows_extracted += 1
 
                 except Exception as e:
                     self.logger.debug(f"Skipping row {row_idx}: {e}")
                     continue
+
+            self.logger.info(f"Table {table_idx}: Processed {rows_processed} rows, extracted {rows_extracted} records")
 
         self.logger.info(f"Extracted {len(records)} records from tables")
         return records
@@ -250,9 +277,10 @@ class IncomeStatementParser(BaseParser):
         Returns:
             Nested dictionary: {year: {code: {name, total}}}
         """
+        self.logger.info(f"Grouping and summing {len(records)} records")
         grouped = defaultdict(lambda: defaultdict(lambda: {"name": "", "total": 0.0}))
 
-        for record in records:
+        for idx, record in enumerate(records):
             year = record["year"]
             code = record["code"]
             amount = record["amount"]
@@ -261,6 +289,8 @@ class IncomeStatementParser(BaseParser):
             grouped[year][code]["total"] += amount
             if code_name and not grouped[year][code]["name"]:
                 grouped[year][code]["name"] = code_name
+
+            self.logger.debug(f"Record {idx}: {year}/{code} += {amount} (total now: {grouped[year][code]['total']})")
 
         # Convert to regular dict for JSON serialization
         result = {}
@@ -277,6 +307,7 @@ class IncomeStatementParser(BaseParser):
 
             # Add year total
             result[year]["_total"] = round(year_total, 2)
+            self.logger.info(f"Year {year} total: {result[year]['_total']} грн ({len([k for k in result[year].keys() if k != '_total'])} codes)")
 
         return result
 
