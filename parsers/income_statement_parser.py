@@ -332,63 +332,73 @@ class IncomeStatementParser(BaseParser):
 
     def format_for_bitrix(self, parsed_data: Dict[str, Any]) -> str:
         """
-        Format parsed data as HTML table for Bitrix24 timeline
+        Format parsed data as text table for Bitrix24 timeline
 
         Args:
             parsed_data: Parsed income data
 
         Returns:
-            HTML formatted string
+            Text formatted string with table borders
         """
         try:
             if not parsed_data.get("success"):
-                return f"<p style='color: red;'>Помилка обробки документа: {parsed_data.get('error', 'Unknown error')}</p>"
+                return f"❌ Помилка обробки документа: {parsed_data.get('error', 'Unknown error')}"
 
             data = parsed_data.get("data", {})
             summary = parsed_data.get("summary", {})
 
             if not data:
-                return "<p>Не знайдено даних про доходи у документі</p>"
+                return "⚠️ Не знайдено даних про доходи у документі"
 
-            # Build HTML table
-            html = "<div style='font-family: Arial, sans-serif;'>"
-            html += "<h3>Аналіз справки про доходи</h3>"
-
-            # Summary
-            html += f"<p><strong>Загальна сума:</strong> {summary.get('total_amount', 0):.2f} грн</p>"
-            html += f"<p><strong>Періоди:</strong> {', '.join(summary.get('years', []))}</p>"
+            # Build text table
+            output = []
+            output.append("=" * 80)
+            output.append("📊 АНАЛІЗ СПРАВКИ ПРО ДОХОДИ")
+            output.append("=" * 80)
+            output.append("")
+            output.append(f"💰 Загальна сума: {summary.get('total_amount', 0):.2f} грн")
+            output.append(f"📅 Періоди: {', '.join(summary.get('years', []))}")
+            output.append("")
 
             # Table for each year
             for year in sorted(data.keys()):
                 year_data = data[year]
                 year_total = year_data.get("_total", 0)
 
-                html += f"<h4>{year} рік (Всього: {year_total:.2f} грн)</h4>"
-                html += "<table border='1' cellpadding='8' cellspacing='0' style='border-collapse: collapse; width: 100%; margin-bottom: 20px;'>"
-                html += "<thead><tr style='background-color: #f0f0f0;'>"
-                html += "<th>Код</th><th>Назва</th><th>Сума (грн)</th>"
-                html += "</tr></thead><tbody>"
+                output.append("-" * 80)
+                output.append(f"📆 {year} рік • Всього: {year_total:.2f} грн")
+                output.append("-" * 80)
+                output.append("")
+
+                # Table header
+                output.append("┌──────┬────────────────────────────────────────────────┬──────────────┐")
+                output.append("│ Код  │ Назва                                          │ Сума (грн)   │")
+                output.append("├──────┼────────────────────────────────────────────────┼──────────────┤")
 
                 for code in sorted(year_data.keys()):
                     if code == "_total":
                         continue
 
                     code_info = year_data[code]
-                    html += f"<tr>"
-                    html += f"<td>{code}</td>"
-                    html += f"<td>{code_info.get('name', '-')}</td>"
-                    html += f"<td style='text-align: right;'>{code_info.get('amount', 0):.2f}</td>"
-                    html += f"</tr>"
+                    name = code_info.get('name', '-')
+                    amount = code_info.get('amount', 0)
 
-                html += "</tbody></table>"
+                    # Truncate name if too long
+                    if len(name) > 46:
+                        name = name[:43] + "..."
 
-            html += "</div>"
+                    output.append(f"│ {code:4s} │ {name:46s} │ {amount:12.2f} │")
 
-            return html
+                output.append("└──────┴────────────────────────────────────────────────┴──────────────┘")
+                output.append("")
+
+            output.append("=" * 80)
+
+            return "\n".join(output)
 
         except Exception as e:
             self.logger.error(f"Formatting failed: {e}")
-            return f"<p style='color: red;'>Помилка форматування: {str(e)}</p>"
+            return f"❌ Помилка форматування: {str(e)}"
 
     def to_json(self, parsed_data: Dict[str, Any]) -> str:
         """
