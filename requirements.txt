@@ -1,0 +1,17 @@
+# Web Framework
+flask==3.0.0
+flask-cors==4.0.0
+gunicorn==21.2.0
+
+# Azure Document Intelligence
+azure-ai-formrecognizer==3.3.2
+azure-core==1.29.5
+
+# HTTP Requests
+requests==2.31.0
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# Utilities
+python-dateutil==2.8.2
