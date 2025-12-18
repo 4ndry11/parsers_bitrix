@@ -23,15 +23,17 @@ class IncomeStatementParser(BaseParser):
         """
         Parse income statement from Azure DI result
 
-        The document has a table with columns:
-        - Column 4: рік (year)
-        - Column 7: Сума доходу нарахованого (accrued income)
-        - Column 13: Код та назва ознаки доходу (income code and name)
+        The document structure:
+        - Text at the beginning
+        - Main table after "період" keyword
+        - Table ends before "Дата форматування"
+        - Table may be split across multiple pages (Azure sees as multiple tables)
 
         We need to:
-        1. Group by year
-        2. Within each year, group by income code
-        3. Sum accrued income amounts
+        1. Find all table parts between "період" and "Дата форматування"
+        2. Merge them into one logical table
+        3. Extract year, income code, and accrued amount
+        4. Group and sum by year and code
 
         Args:
             azure_result: Result from Azure Document Intelligence
@@ -44,11 +46,25 @@ class IncomeStatementParser(BaseParser):
 
             content = azure_result["analyzeResult"]["content"]
             tables = azure_result["analyzeResult"].get("tables", [])
+            pages = azure_result["analyzeResult"].get("pages", [])
 
-            self.logger.info(f"Parsing document with {len(tables)} tables")
+            self.logger.info(f"Parsing document with {len(tables)} tables, {len(pages)} pages")
+            self.logger.info(f"Content length: {len(content)} chars")
 
-            # Extract data from tables
-            income_data = self._extract_from_tables(tables)
+            # Find table boundaries in content
+            period_pos = content.lower().find("період")
+            date_format_pos = content.lower().find("дата форматування")
+
+            self.logger.info(f"Found 'період' at position: {period_pos}")
+            self.logger.info(f"Found 'Дата форматування' at position: {date_format_pos}")
+
+            # Filter tables that are between these markers
+            relevant_tables = self._filter_relevant_tables(tables, content, period_pos, date_format_pos)
+
+            self.logger.info(f"Found {len(relevant_tables)} relevant tables out of {len(tables)}")
+
+            # Extract data from relevant tables (they are parts of one table)
+            income_data = self._extract_from_merged_tables(relevant_tables)
 
             # If no tables found, try extracting from text
             if not income_data:
@@ -68,12 +84,194 @@ class IncomeStatementParser(BaseParser):
             return result
 
         except Exception as e:
-            self.logger.error(f"Parsing failed: {e}")
+            self.logger.error(f"Parsing failed: {e}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e),
                 "data": {}
             }
+
+    def _filter_relevant_tables(self, tables: List[Dict], content: str, period_pos: int, date_format_pos: int) -> List[Dict]:
+        """
+        Filter tables that are between 'період' and 'Дата форматування'
+        These tables are parts of the main income table split across pages
+
+        Args:
+            tables: All tables from Azure DI
+            content: Full document content
+            period_pos: Position of 'період' in content
+            date_format_pos: Position of 'Дата форматування' in content
+
+        Returns:
+            List of relevant table parts
+        """
+        if period_pos == -1:
+            self.logger.warning("'період' not found in content, using all tables")
+            return tables
+
+        relevant = []
+
+        for idx, table in enumerate(tables):
+            # Get first cell position as table start position
+            cells = table.get("cells", [])
+            if not cells:
+                continue
+
+            # Find min and max offset in table cells
+            min_offset = min(cell.get("spans", [{}])[0].get("offset", 999999) for cell in cells if cell.get("spans"))
+            max_offset = max(cell.get("spans", [{}])[0].get("offset", 0) for cell in cells if cell.get("spans"))
+
+            self.logger.info(f"Table {idx}: offset range {min_offset} - {max_offset}")
+
+            # Table is relevant if it's after 'період' and before 'Дата форматування' (or end of doc)
+            if min_offset > period_pos:
+                if date_format_pos == -1 or max_offset < date_format_pos:
+                    relevant.append(table)
+                    self.logger.info(f"Table {idx} is relevant (between markers)")
+                else:
+                    self.logger.info(f"Table {idx} is after 'Дата форматування', skipping")
+            else:
+                self.logger.info(f"Table {idx} is before 'період', skipping")
+
+        return relevant
+
+    def _extract_from_merged_tables(self, tables: List[Dict]) -> List[Dict[str, Any]]:
+        """
+        Extract income data from multiple table parts that form one logical table
+
+        The tables are parts of the same table split across pages, so:
+        - First table has header row
+        - Other tables continue with data rows
+        - Column structure is the same across all parts
+
+        Args:
+            tables: List of table parts
+
+        Returns:
+            List of records with year, code, and amount
+        """
+        if not tables:
+            self.logger.warning("No tables to extract from")
+            return []
+
+        records = []
+        col_year = None
+        col_amount = None
+        col_code = None
+        header_found = False
+
+        self.logger.info(f"Processing {len(tables)} table parts as one merged table")
+
+        for table_idx, table in enumerate(tables):
+            cells = table.get("cells", [])
+            if not cells:
+                self.logger.warning(f"Table part {table_idx} has no cells")
+                continue
+
+            row_count = table["rowCount"]
+            col_count = table["columnCount"]
+            self.logger.info(f"Table part {table_idx}: {row_count} rows x {col_count} columns")
+
+            # Build table structure
+            table_data = self._build_table_structure(cells, row_count, col_count)
+
+            # Log first few rows
+            self.logger.info(f"Table part {table_idx} first 3 rows:")
+            for row_idx in range(min(3, len(table_data))):
+                row_preview = table_data[row_idx][:min(15, len(table_data[row_idx]))]
+                self.logger.info(f"  Row {row_idx}: {row_preview}")
+
+            # Find column indices only in first table or if not found yet
+            if not header_found:
+                for row_idx in range(min(5, len(table_data))):
+                    row = table_data[row_idx]
+                    for col_idx, cell_content in enumerate(row):
+                        if cell_content and "рік" in cell_content.lower():
+                            col_year = col_idx
+                            self.logger.info(f"Found 'рік' at column {col_idx}: '{cell_content}'")
+                            header_found = True
+                        if cell_content and "нарахованого" in cell_content.lower():
+                            col_amount = col_idx
+                            self.logger.info(f"Found 'нарахованого' at column {col_idx}: '{cell_content}'")
+                        if cell_content and "код" in cell_content.lower() and "ознаки" in cell_content.lower():
+                            col_code = col_idx
+                            self.logger.info(f"Found 'код...ознаки' at column {col_idx}: '{cell_content}'")
+
+            if col_year is None or col_amount is None or col_code is None:
+                self.logger.warning(f"Table part {table_idx}: Columns not identified yet (Year:{col_year}, Amount:{col_amount}, Code:{col_code})")
+                # Continue to next table part, maybe it has header
+                continue
+
+            self.logger.info(f"Using columns - Year: {col_year}, Amount: {col_amount}, Code: {col_code}")
+
+            # Extract data rows
+            start_row = 1 if table_idx == 0 else 0  # Skip header only in first table
+            rows_extracted = 0
+
+            for row_idx in range(start_row, len(table_data)):
+                row = table_data[row_idx]
+
+                try:
+                    year_cell = row[col_year] if col_year < len(row) else ""
+                    amount_cell = row[col_amount] if col_amount < len(row) else ""
+                    code_cell = row[col_code] if col_code < len(row) else ""
+
+                    # Skip header rows in continuation tables
+                    if "рік" in year_cell.lower() or "період" in year_cell.lower():
+                        self.logger.debug(f"Row {row_idx}: Skipping header row")
+                        continue
+
+                    # Skip empty rows
+                    if not year_cell.strip() and not amount_cell.strip() and not code_cell.strip():
+                        continue
+
+                    # Extract year (should be 4 digits)
+                    year_match = re.search(r'\b(20\d{2})\b', year_cell)
+                    if not year_match:
+                        self.logger.debug(f"Row {row_idx}: No year found in '{year_cell}'")
+                        continue
+
+                    year = year_match.group(1)
+
+                    # Extract amount (number with optional decimal)
+                    amount_cell_clean = amount_cell.replace(' ', '').replace(',', '.')
+                    amount_match = re.search(r'(\d+(?:[.,]\d+)?)', amount_cell_clean)
+                    if not amount_match:
+                        self.logger.debug(f"Row {row_idx}: No amount found in '{amount_cell}'")
+                        continue
+
+                    amount = float(amount_match.group(1).replace(',', '.'))
+
+                    # Extract code (3 digits)
+                    code_match = re.search(r'\b(\d{3})\b', code_cell)
+                    if not code_match:
+                        self.logger.debug(f"Row {row_idx}: No code found in '{code_cell}'")
+                        continue
+
+                    code = code_match.group(1)
+
+                    # Extract code name if present
+                    code_name_match = re.search(r'\d{3}\s*[-–—]\s*(.+)', code_cell)
+                    code_name = code_name_match.group(1).strip() if code_name_match else ""
+
+                    self.logger.info(f"Table {table_idx} Row {row_idx}: Year={year}, Code={code}, Amount={amount}, Name={code_name}")
+
+                    records.append({
+                        "year": year,
+                        "code": code,
+                        "code_name": code_name,
+                        "amount": amount
+                    })
+                    rows_extracted += 1
+
+                except Exception as e:
+                    self.logger.debug(f"Table {table_idx} Row {row_idx}: Skipping - {e}")
+                    continue
+
+            self.logger.info(f"Table part {table_idx}: Extracted {rows_extracted} records")
+
+        self.logger.info(f"Total extracted {len(records)} records from {len(tables)} table parts")
+        return records
 
     def _extract_from_tables(self, tables: List[Dict]) -> List[Dict[str, Any]]:
         """
