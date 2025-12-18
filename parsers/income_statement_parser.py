@@ -352,9 +352,7 @@ class IncomeStatementParser(BaseParser):
 
             # Build simple text output
             output = []
-            output.append("================================================================================")
             output.append("📊 АНАЛІЗ СПРАВКИ ПРО ДОХОДИ")
-            output.append("================================================================================")
             output.append("")
             output.append(f"💰 Загальна сума: {summary.get('total_amount', 0):.2f} грн")
             output.append(f"📅 Періоди: {', '.join(summary.get('years', []))}")
@@ -365,9 +363,8 @@ class IncomeStatementParser(BaseParser):
                 year_data = data[year]
                 year_total = year_data.get("_total", 0)
 
-                output.append("--------------------------------------------------------------------------------")
+                output.append("─────────")
                 output.append(f"📆 {year} рік • Всього: {year_total:.2f} грн")
-                output.append("--------------------------------------------------------------------------------")
                 output.append("")
 
                 for code in sorted(year_data.keys()):
@@ -378,11 +375,9 @@ class IncomeStatementParser(BaseParser):
                     name = code_info.get('name', '-')
                     amount = code_info.get('amount', 0)
 
-                    output.append(f"   🔹 Код {code}: {name}")
-                    output.append(f"      💵 Сума: {amount:.2f} грн")
+                    output.append(f"🔹 Код {code}: {name}")
+                    output.append(f"   Сума: {amount:.2f} грн")
                     output.append("")
-
-            output.append("================================================================================")
 
             return "\n".join(output)
 
