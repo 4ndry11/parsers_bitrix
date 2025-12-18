@@ -37,34 +37,42 @@ def health_check():
     })
 
 
-@app.route('/webhook/process-income-statement', methods=['POST'])
+@app.route('/webhook/process-income-statement', methods=['POST', 'GET'])
 def process_income_statement():
     """
     Webhook endpoint for processing income statement documents
 
-    Expected JSON payload:
-    {
-        "deal_id": 123
-    }
+    Accepts deal_id via:
+    1. URL parameter: ?deal_id=123
+    2. JSON body: {"deal_id": 123}
 
     Returns:
         JSON response with status
     """
     try:
-        # Get request data
-        data = request.get_json()
+        # Try to get deal_id from URL parameter first
+        deal_id = request.args.get('deal_id')
 
-        if not data:
-            logger.error("No JSON data received")
-            return jsonify({"success": False, "error": "No data provided"}), 400
-
-        deal_id = data.get("deal_id")
+        # If not in URL, try JSON body
+        if not deal_id:
+            data = request.get_json()
+            if data:
+                deal_id = data.get("deal_id")
 
         if not deal_id:
-            logger.error(f"Missing required field: deal_id={deal_id}")
+            logger.error("Missing deal_id parameter")
             return jsonify({
                 "success": False,
-                "error": "Missing deal_id"
+                "error": "Missing deal_id parameter. Use ?deal_id=123 or JSON body"
+            }), 400
+
+        # Convert to int
+        try:
+            deal_id = int(deal_id)
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "error": "deal_id must be a number"
             }), 400
 
         logger.info(f"Processing income statement for deal {deal_id}")
