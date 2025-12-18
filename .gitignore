@@ -1,6 +1,9 @@
 # Environment variables
 .env
 
+# Claude
+.claude/
+
 # Python
 __pycache__/
 *.py[cod]
