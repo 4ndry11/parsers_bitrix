@@ -121,16 +121,20 @@ class IncomeStatementParser(BaseParser):
             cells_with_spans = [cell for cell in cells if cell.get("spans") and len(cell.get("spans", [])) > 0]
 
             if not cells_with_spans:
-                # Fallback: use bounding regions
+                # Fallback: if no offset data, check page number
                 self.logger.info(f"Table {idx}: No spans found, using bounding regions")
                 bounding_regions = table.get("boundingRegions", [])
                 if bounding_regions:
                     page_number = bounding_regions[0].get("pageNumber", 1)
                     self.logger.info(f"Table {idx}: on page {page_number}")
-                    # After okres always use all tables as relevant
+
+                    # If we found "період" marker, consider all tables as potentially relevant
+                    # (we can't determine exact position without offset data)
                     if period_pos > 0:
                         relevant.append(table)
-                        self.logger.info(f"Table {idx} is relevant (no offset data, assuming relevant)")
+                        self.logger.info(f"Table {idx} is relevant (assuming relevant after 'період' marker)")
+                else:
+                    self.logger.warning(f"Table {idx}: No bounding regions found")
                 continue
 
             # Find min and max offset in table cells
