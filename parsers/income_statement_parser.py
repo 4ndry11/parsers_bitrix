@@ -164,19 +164,56 @@ class IncomeStatementParser(BaseParser):
             self.logger.info("Table 0: Skipped (document header)")
 
             # Table 1 - find index row and cut header
+            # First, debug table 1 structure
+            _, rows_1_debug = self._table_to_grid(tables[1])
+            self.logger.info(f"Table 1 structure: {len(rows_1_debug)} rows")
+            for i in range(min(5, len(rows_1_debug))):
+                row = rows_1_debug.get(i, {})
+                self.logger.info(f"  Row {i}: col[0]={row.get(0, '')} col[1]={row.get(1, '')} col[2]={row.get(2, '')} col[3]={row.get(3, '')}")
+
             rows_1, cols = self._extract_rows_for_processing(1, tables[1], fallback_cols=None)
 
             if cols is None:
-                raise RuntimeError("Cannot find index row in Table 1 (col[0]='1' + '4','7','13')")
+                self.logger.error("Cannot find index row in Table 1")
+                self.logger.error("Trying to find index row in ALL tables...")
 
-            self.logger.info(f"Table 1: Processed, header cut. Columns: year={cols[0]}, amount={cols[1]}, code={cols[2]}")
-            all_rows.extend(rows_1)
+                # Try to find in any table
+                for table_idx in range(len(tables)):
+                    self.logger.info(f"Checking table {table_idx} for index row...")
+                    _, rows_debug = self._table_to_grid(tables[table_idx])
+                    self.logger.info(f"  Table {table_idx}: {len(rows_debug)} rows")
 
-            # Tables 2+ - use columns from table 1
-            for table_idx in range(2, len(tables)):
-                rows_i, _ = self._extract_rows_for_processing(table_idx, tables[table_idx], fallback_cols=cols)
-                all_rows.extend(rows_i)
-                self.logger.info(f"Table {table_idx}: Added {len(rows_i)} rows")
+                    for row_idx in list(rows_debug.keys())[:5]:
+                        row = rows_debug[row_idx]
+                        self.logger.info(f"    Row {row_idx}: col[0]={row.get(0, '')[:20]}")
+
+                    rows_temp, cols_temp = self._extract_rows_for_processing(table_idx, tables[table_idx], fallback_cols=None)
+                    if cols_temp is not None:
+                        self.logger.info(f"Found index row in table {table_idx}!")
+                        # Use this table as starting point
+                        all_rows.extend(rows_temp)
+                        cols = cols_temp
+
+                        # Add all subsequent tables
+                        for next_idx in range(table_idx + 1, len(tables)):
+                            rows_next, _ = self._extract_rows_for_processing(next_idx, tables[next_idx], fallback_cols=cols)
+                            all_rows.extend(rows_next)
+                            self.logger.info(f"Table {next_idx}: Added {len(rows_next)} rows")
+
+                        break
+
+                if cols is None:
+                    raise RuntimeError("Cannot find index row in ANY table (col[0]='1' + '4','7','13')")
+            else:
+                # Normal flow - found in table 1
+                self.logger.info(f"Table 1: Processed, header cut. Columns: year={cols[0]}, amount={cols[1]}, code={cols[2]}")
+                all_rows.extend(rows_1)
+
+                # Tables 2+ - use columns from table 1
+                for table_idx in range(2, len(tables)):
+                    rows_i, _ = self._extract_rows_for_processing(table_idx, tables[table_idx], fallback_cols=cols)
+                    all_rows.extend(rows_i)
+                    self.logger.info(f"Table {table_idx}: Added {len(rows_i)} rows")
 
             # Parse data from rows
             records, totals = self._parse_rows_data(all_rows)
