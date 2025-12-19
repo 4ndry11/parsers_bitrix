@@ -188,30 +188,32 @@ class IncomeStatementParser(BaseParser):
             col_count = table["columnCount"]
             self.logger.info(f"Table part {table_idx}: {row_count} rows x {col_count} columns")
 
-            # Build table structure
-            table_data = self._build_table_structure(cells, row_count, col_count)
-
-            # Log first few rows
-            self.logger.info(f"Table part {table_idx} first 3 rows:")
-            for row_idx in range(min(3, len(table_data))):
-                row_preview = table_data[row_idx][:min(15, len(table_data[row_idx]))]
-                self.logger.info(f"  Row {row_idx}: {row_preview}")
+            # Log first few cells
+            self.logger.info(f"Table part {table_idx} first 10 cells:")
+            for cell_idx, cell in enumerate(cells[:10]):
+                self.logger.info(f"  Cell[{cell.get('rowIndex', '?')}][{cell.get('columnIndex', '?')}]: '{cell.get('content', '')}'")
 
             # Find column indices only in first table or if not found yet
             if not header_found:
-                for row_idx in range(min(5, len(table_data))):
-                    row = table_data[row_idx]
-                    for col_idx, cell_content in enumerate(row):
-                        if cell_content and "рік" in cell_content.lower():
-                            col_year = col_idx
-                            self.logger.info(f"Found 'рік' at column {col_idx}: '{cell_content}'")
-                            header_found = True
-                        if cell_content and "нарахованого" in cell_content.lower():
-                            col_amount = col_idx
-                            self.logger.info(f"Found 'нарахованого' at column {col_idx}: '{cell_content}'")
-                        if cell_content and "код" in cell_content.lower() and "ознаки" in cell_content.lower():
-                            col_code = col_idx
-                            self.logger.info(f"Found 'код...ознаки' at column {col_idx}: '{cell_content}'")
+                # Look at first few rows to find headers
+                for cell in cells:
+                    row_idx = cell.get("rowIndex", 0)
+                    col_idx = cell.get("columnIndex", 0)
+                    content = cell.get("content", "")
+
+                    if row_idx >= 5:  # Only check first 5 rows
+                        continue
+
+                    if content and "рік" in content.lower():
+                        col_year = col_idx
+                        self.logger.info(f"Found 'рік' at column {col_idx}: '{content}'")
+                        header_found = True
+                    if content and "нарахованого" in content.lower():
+                        col_amount = col_idx
+                        self.logger.info(f"Found 'нарахованого' at column {col_idx}: '{content}'")
+                    if content and "код" in content.lower() and "ознаки" in content.lower():
+                        col_code = col_idx
+                        self.logger.info(f"Found 'код...ознаки' at column {col_idx}: '{content}'")
 
             if col_year is None or col_amount is None or col_code is None:
                 self.logger.warning(f"Table part {table_idx}: Columns not identified yet (Year:{col_year}, Amount:{col_amount}, Code:{col_code})")
@@ -220,17 +222,31 @@ class IncomeStatementParser(BaseParser):
 
             self.logger.info(f"Using columns - Year: {col_year}, Amount: {col_amount}, Code: {col_code}")
 
+            # Group cells by row for easier access
+            rows_data = {}
+            for cell in cells:
+                row_idx = cell.get("rowIndex", 0)
+                col_idx = cell.get("columnIndex", 0)
+                content = cell.get("content", "")
+
+                if row_idx not in rows_data:
+                    rows_data[row_idx] = {}
+                rows_data[row_idx][col_idx] = content
+
             # Extract data rows
             start_row = 1 if table_idx == 0 else 0  # Skip header only in first table
             rows_extracted = 0
 
-            for row_idx in range(start_row, len(table_data)):
-                row = table_data[row_idx]
+            for row_idx in sorted(rows_data.keys()):
+                if row_idx < start_row:
+                    continue
+
+                row = rows_data[row_idx]
 
                 try:
-                    year_cell = row[col_year] if col_year < len(row) else ""
-                    amount_cell = row[col_amount] if col_amount < len(row) else ""
-                    code_cell = row[col_code] if col_code < len(row) else ""
+                    year_cell = row.get(col_year, "")
+                    amount_cell = row.get(col_amount, "")
+                    code_cell = row.get(col_code, "")
 
                     # Skip header rows in continuation tables
                     if "рік" in year_cell.lower() or "період" in year_cell.lower():
