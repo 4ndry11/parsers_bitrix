@@ -112,14 +112,30 @@ class IncomeStatementParser(BaseParser):
         relevant = []
 
         for idx, table in enumerate(tables):
-            # Get first cell position as table start position
             cells = table.get("cells", [])
             if not cells:
+                self.logger.warning(f"Table {idx} has no cells")
+                continue
+
+            # Try to find offset from spans
+            cells_with_spans = [cell for cell in cells if cell.get("spans") and len(cell.get("spans", [])) > 0]
+
+            if not cells_with_spans:
+                # Fallback: use bounding regions
+                self.logger.info(f"Table {idx}: No spans found, using bounding regions")
+                bounding_regions = table.get("boundingRegions", [])
+                if bounding_regions:
+                    page_number = bounding_regions[0].get("pageNumber", 1)
+                    self.logger.info(f"Table {idx}: on page {page_number}")
+                    # After okres always use all tables as relevant
+                    if period_pos > 0:
+                        relevant.append(table)
+                        self.logger.info(f"Table {idx} is relevant (no offset data, assuming relevant)")
                 continue
 
             # Find min and max offset in table cells
-            min_offset = min(cell.get("spans", [{}])[0].get("offset", 999999) for cell in cells if cell.get("spans"))
-            max_offset = max(cell.get("spans", [{}])[0].get("offset", 0) for cell in cells if cell.get("spans"))
+            min_offset = min(cell["spans"][0].get("offset", 999999) for cell in cells_with_spans)
+            max_offset = max(cell["spans"][0].get("offset", 0) for cell in cells_with_spans)
 
             self.logger.info(f"Table {idx}: offset range {min_offset} - {max_offset}")
 
