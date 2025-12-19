@@ -440,16 +440,16 @@ class IncomeStatementParser(BaseParser):
 
             # Build simple text output
             output = []
-            output.append("📊 АНАЛІЗ СПРАВКИ ПРО ДОХОДИ")
+            output.append("📊 АНАЛІЗ ДОВІДКИ ПРО ДОХОДИ")
             output.append("")
             output.append(f"💰 Загальна сума: {summary.get('total_amount', 0):.2f} грн")
             output.append(f"📅 Періоди: {', '.join(summary.get('years', []))}")
 
             # Verification status
             if verification.get("total_match"):
-                output.append("✅ Сверка з 'Всього': СОВПАДАЕТ")
+                output.append("✅ Звірка з 'Всього': СОВПАДАЕТ")
             else:
-                output.append(f"⚠️ Сверка з 'Всього': РАСХОЖДЕНИЕ {verification.get('total_diff', 0):.2f} грн")
+                output.append(f"⚠️ Звірка з 'Всього': РАСХОЖДЕНИЕ {verification.get('total_diff', 0):.2f} грн")
 
             output.append("")
 
@@ -466,9 +466,9 @@ class IncomeStatementParser(BaseParser):
                 year_mismatch = [m for m in verification.get("mismatches", []) if m["year"] == year]
 
                 if year_match:
-                    output.append(f"   ✅ Сверка: {year_match[0]['expected']:.2f} грн")
+                    output.append(f"   ✅ Звірка: {year_match[0]['expected']:.2f} грн")
                 elif year_mismatch:
-                    output.append(f"   ⚠️ Сверка: {year_mismatch[0]['expected']:.2f} грн (різниця {year_mismatch[0]['diff']:.2f} грн)")
+                    output.append(f"   ⚠️ Звірка: {year_mismatch[0]['expected']:.2f} грн (різниця {year_mismatch[0]['diff']:.2f} грн)")
 
                 output.append("")
 
